@@ -4,7 +4,7 @@ import { Checkbox, ChoiceGroup, IChoiceGroupOption, Panel, DefaultButton, Spinne
 import styles from "./OneShot.module.css";
 import { Dropdown, DropdownMenuItemType, IDropdownStyles, IDropdownOption } from '@fluentui/react/lib/Dropdown';
 
-import { askApi, askAgentApi, askTaskAgentApi, Approaches, AskResponse, AskRequest, refreshIndex, getSpeechApi, summaryAndQa } from "../../api";
+import { askApi, askAgentApi, askTaskAgentApi, Approaches, AskResponse, AskRequest, refreshIndex, getSpeechApi, summaryAndQa, refreshQuestions } from "../../api";
 import { Answer, AnswerError } from "../../components/Answer";
 import { QuestionInput } from "../../components/QuestionInput";
 import { AnalysisPanel, AnalysisPanelTabs } from "../../components/AnalysisPanel";
@@ -12,15 +12,19 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { Label } from '@fluentui/react/lib/Label';
 import { ExampleList, ExampleModel } from "../../components/Example";
 import { SettingsButton } from "../../components/SettingsButton/SettingsButton";
+import { QuestionListButton } from "../../components/QuestionListButton/QuestionListButton";
 import { ClearChatButton } from "../../components/ClearChatButton";
 import { Pivot, PivotItem } from '@fluentui/react';
 import { IStackStyles, IStackTokens, IStackItemStyles } from '@fluentui/react/lib/Stack';
 import { DefaultPalette } from '@fluentui/react/lib/Styling';
+import { DetailsList, DetailsListLayoutMode, SelectionMode, ConstrainMode } from '@fluentui/react/lib/DetailsList';
+import { mergeStyleSets } from '@fluentui/react/lib/Styling';
 
 var audio = new Audio();
 
 const OneShot = () => {
     const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
+    const [isQuestionPanelOpen, setIsQuestionPanelOpen] = useState(false);
     const [approach, setApproach] = useState<Approaches>(Approaches.RetrieveThenRead);
     const [promptTemplate, setPromptTemplate] = useState<string>("");
     const [promptTemplatePrefix, setPromptTemplatePrefix] = useState<string>("");
@@ -82,6 +86,30 @@ const OneShot = () => {
     const [selectedTaskAgentText, setSelectedTaskAgentText] = useState<string[]>([]);
     const [selectedTaskAgentIndexes, setSelectedTaskAgentIndexes] = useState<{ indexNs: string; indexName: any; returnDirect: string; }[]>([]);
     const [selectedEmbeddingItem, setSelectedEmbeddingItem] = useState<IDropdownOption>();
+    const [questionList, setQuestionList] = useState<any[]>();
+
+    const classNames = mergeStyleSets({
+        header: {
+          margin: 0,
+        },
+        row: {
+          flex: '0 0 auto',
+        },
+        focusZone: {
+          height: '100%',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+        },
+        selectionZone: {
+          height: '100%',
+          overflow: 'hidden',
+        },
+      });
+
+    const focusZoneProps = {
+        className: classNames.focusZone,
+        'data-is-scrollable': 'true',
+    } as React.HTMLAttributes<HTMLElement>;
 
     const embeddingOptions = [
         {
@@ -111,6 +139,15 @@ const OneShot = () => {
         //   key: 'chroma',
         //   text: 'Chroma'
         // }
+    ]
+
+    const questionListColumn = [
+        {
+          key: 'question',
+          name: 'Question',
+          fieldName: 'question',
+          minWidth: 100, maxWidth: 200, isResizable: true
+        }
     ]
 
     const stackItemStyles: IStackItemStyles = {
@@ -502,6 +539,40 @@ const OneShot = () => {
         setIndexMapping(uniqIndexType)
     }
 
+    const clickRefreshQuestions = async () => {
+        setIsQuestionPanelOpen(!isQuestionPanelOpen)
+        await refreshQuestionList()
+    }
+
+    const refreshQuestionList = async () => {
+        let questionList
+        if (selectedIndex == undefined) {
+            questionList = await refreshQuestions(selectedIndexes[0].indexName, selectedIndexes[0].indexNs)
+        }
+        else 
+            questionList = await refreshQuestions(String(selectedIndex), String(selectedItem?.key))
+        
+        const sampleQuestionList = []
+        for (const question of questionList.values) {
+            sampleQuestionList.push({
+                question: question.question,
+            });    
+        }
+        setQuestionList(sampleQuestionList)
+    }
+
+    // const refreshQuestionsList = async (indexType:string, indexName:string) => {
+    //     const questionList = await  refreshQuestions(indexType, indexName)
+        
+    //     const sampleQuestionList = []
+    //     for (const question of questionList.values) {
+    //         sampleQuestionList.push({
+    //             question: question.question,
+    //         });    
+    //     }
+    //     setQuestionList(sampleQuestionList)
+    // }
+
     const refreshSummary = async (requestType : string) => {
         try {
             const result = await summaryAndQa(String(selectedIndex), String(selectedItem?.key), String(selectedEmbeddingItem?.key), 
@@ -536,6 +607,8 @@ const OneShot = () => {
                 const generatedExamples: ExampleModel[] = sampleQuestion
                 setExampleList(generatedExamples)
                 setExampleLoading(false)
+
+                //refreshQuestionsList(item.iType, item.key)
             }
         })
     };
@@ -578,6 +651,10 @@ const OneShot = () => {
         }
     ];
 
+    const onQuestionClicked = (questionFromList: any) => {
+        makeApiRequest(questionFromList.question);
+    }
+    
     const clearChat = () => {
         lastQuestionRef.current = "";
         error && setError(undefined);
@@ -624,6 +701,7 @@ const OneShot = () => {
                                 <div className={styles.commandsContainer}>
                                     <ClearChatButton className={styles.settingsButton} onClick={clearChat} disabled={!lastQuestionRef.current || isLoading} />
                                     <SettingsButton className={styles.settingsButton} onClick={() => setIsConfigPanelOpen(!isConfigPanelOpen)} />
+                                    <QuestionListButton className={styles.settingsButton} onClick={() => clickRefreshQuestions()} />
                                     <div className={styles.settingsButton}>{selectedItem ? 
                                             "Document Name : "  + selectedItem.text : undefined}</div>
                                 </div>
@@ -684,6 +762,37 @@ const OneShot = () => {
                                     />
                                 )}
                             </div>
+
+                            <Panel
+                                headerText="List of Questions for KB"
+                                isOpen={isQuestionPanelOpen}
+                                isBlocking={false}
+                                onDismiss={() => setIsQuestionPanelOpen(false)}
+                                closeButtonAriaLabel="Close"
+                                onRenderFooterContent={() => <DefaultButton onClick={() => setIsQuestionPanelOpen(false)}>Close</DefaultButton>}
+                                isFooterAtBottom={true}
+                            >
+                                <br/>
+                                <Label>Double Click the question from the KB to get the cached answer</Label>
+                                <div>
+                                    <DetailsList
+                                        compact={true}
+                                        items={questionList || []}
+                                        columns={questionListColumn}
+                                        selectionMode={SelectionMode.none}
+                                        getKey={(item: any) => item.key}
+                                        setKey="none"
+                                        constrainMode={ConstrainMode.unconstrained}
+                                        onItemInvoked={(item:any) => onQuestionClicked(item)}
+                                        focusZoneProps={focusZoneProps}
+                                        layoutMode={DetailsListLayoutMode.justified}
+                                        ariaLabelForSelectionColumn="Toggle selection"
+                                        checkButtonAriaLabel="select row"
+                                    />
+                                </div>
+                                <br/>
+                                <DefaultButton onClick={refreshQuestionList}>Refresh Question</DefaultButton>
+                            </Panel>
 
                             <Panel
                                 headerText="Configure answer generation"

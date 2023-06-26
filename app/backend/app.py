@@ -16,6 +16,8 @@ from azure.ai.textanalytics import (
     ExtractKeyPhrasesAction,
 )
 import azure.cognitiveservices.speech as speechsdk
+from azure.search.documents import SearchClient
+from azure.core.credentials import AzureKeyCredential
 
 load_dotenv()
 app = Flask(__name__)
@@ -356,6 +358,103 @@ def refreshIndex():
         logging.exception("Exception in /refreshIndex")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/refreshQuestions", methods=["POST"])
+def refreshQuestions():
+   
+    kbIndexName = os.environ.get("KBINDEXNAME")
+    SearchService = os.environ.get("SEARCHSERVICE")
+    SearchKey = os.environ.get("SEARCHKEY")
+    searchClient = SearchClient(endpoint=f"https://{SearchService}.search.windows.net",
+        index_name=kbIndexName,
+        credential=AzureKeyCredential(SearchKey))
+    
+    indexType=request.json["indexType"]
+    indexName=request.json["indexName"]
+
+    try:
+        r = searchClient.search(  
+            search_text="",
+            filter="indexType eq '" + indexType + "' and indexName eq '" + indexName + "'",
+            select=["question"],
+            include_total_count=True
+        )
+        questionsList = []
+        for question in r:
+            try:
+                questionsList.append({
+                    "question": question['question'],
+                })
+            except Exception as e:
+                pass
+
+        #jsonDict = json.dumps(blobJson)
+        return jsonify({"values" : questionsList})
+    except Exception as e:
+        logging.exception("Exception in /refreshQuestions")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/refreshIndexQuestions", methods=["POST"])
+def refreshIndexQuestions():
+   
+    kbIndexName = os.environ.get("KBINDEXNAME")
+    SearchService = os.environ.get("SEARCHSERVICE")
+    SearchKey = os.environ.get("SEARCHKEY")
+    searchClient = SearchClient(endpoint=f"https://{SearchService}.search.windows.net",
+        index_name=kbIndexName,
+        credential=AzureKeyCredential(SearchKey))
+    
+    indexType=request.json["indexType"]
+
+    try:
+        r = searchClient.search(  
+            search_text="",
+            filter="indexType eq '" + indexType + "'",
+            select=["id", "question", "indexType", "indexName"],
+            include_total_count=True
+        )
+        logging.info(r.get_count())
+        questionsList = []
+        for question in r:
+            try:
+                questionsList.append({
+                    "id": question['id'],
+                    "question": question['question'],
+                    "indexType": question['indexType'],
+                    "indexName": question['indexName'],
+                })
+            except Exception as e:
+                pass
+
+        #jsonDict = json.dumps(blobJson)
+        return jsonify({"values" : questionsList})
+    except Exception as e:
+        logging.exception("Exception in /refreshIndexQuestions")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/kbQuestionManagement", methods=["POST"])
+def kbQuestionManagement():
+   
+    kbIndexName = os.environ.get("KBINDEXNAME")
+    SearchService = os.environ.get("SEARCHSERVICE")
+    SearchKey = os.environ.get("SEARCHKEY")
+    searchClient = SearchClient(endpoint=f"https://{SearchService}.search.windows.net",
+        index_name=kbIndexName,
+        credential=AzureKeyCredential(SearchKey))
+    
+    documentsToDelete=request.json["documentsToDelete"]
+
+    try:
+        r = searchClient.delete_documents(documents=documentsToDelete)
+        questionsList = []
+        questionsList.append({
+            "result": "success",
+        })
+        #jsonDict = json.dumps(blobJson)
+        return jsonify({"values" : questionsList})
+    except Exception as e:
+        logging.exception("Exception in /kbQuestionManagement")
+        return jsonify({"error": str(e)}), 500
+    
 @app.route("/indexManagement", methods=["POST"])
 def indexManagement():
    
@@ -464,16 +563,16 @@ def content_file(path):
     url = os.environ.get("BLOB_CONNECTION_STRING")
     containerName = os.environ.get("BLOB_CONTAINER_NAME")
     blobClient = BlobServiceClient.from_connection_string(url)
-    logging.info(f"Getting blob {path}")
+    logging.info(f"Getting blob {path.strip()} from container {containerName}")
     blobContainer = blobClient.get_container_client(container=containerName)
-    blob = blobContainer.get_blob_client(path).download_blob()
+    blob = blobContainer.get_blob_client(path.strip()).download_blob()
     mime_type = blob.properties["content_settings"]["content_type"]
     if mime_type == "application/octet-stream":
-        mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        mime_type = mimetypes.guess_type(path.strip())[0] or "application/octet-stream"
     return blob.readall(), 200, {"Content-Type": mime_type, "Content-Disposition": f"inline; filename={path}"}
     
 
-@app.route("/secsearch", methods=["POST"])
+@app.route("/secSearch", methods=["POST"])
 def secsearch():
     indexType=request.json["indexType"]
     indexName=request.json["indexName"]
